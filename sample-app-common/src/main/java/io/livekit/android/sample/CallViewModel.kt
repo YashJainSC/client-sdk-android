@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2025 LiveKit, Inc.
+ * Copyright 2023-2026 LiveKit, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import android.app.Application
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.lifecycle.AndroidViewModel
@@ -47,7 +48,11 @@ import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.room.track.CameraPosition
 import io.livekit.android.room.track.LocalScreencastVideoTrack
 import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.VideoCaptureParameter
+import io.livekit.android.room.track.VideoPreset
+import io.livekit.android.room.track.VideoPreset169
 import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import io.livekit.android.room.track.video.CameraCapturerUtils
 import io.livekit.android.sample.model.StressTest
@@ -89,9 +94,10 @@ class CallViewModel(
 
     private fun getRoomOptions(): RoomOptions {
         return RoomOptions(
-            adaptiveStream = true,
-            dynacast = true,
+            adaptiveStream = false,
+            dynacast = false,
             e2eeOptions = getE2EEOptions(),
+            useSinglePeerConnection = true
         )
     }
 
@@ -196,6 +202,25 @@ class CallViewModel(
                             mutableDataReceived.emit("$identity: $message")
                         }
 
+                        is RoomEvent.Connected -> {
+                            Log.d("livekit_metric", "livekit_metric: RoomEvent.Connected event received")
+                        }
+
+                        is RoomEvent.ParticipantConnected -> {
+                            Log.d("livekit_metric", "livekit_metric: ParticipantConnected id: ${it.participant.sid}")
+                        }
+
+                        is RoomEvent.ParticipantDisconnected -> {
+                            Log.d("livekit_metric", "livekit_metric: ParticipantDisconnected id: ${it.participant.sid}")
+                        }
+
+                        is RoomEvent.TrackPublished -> {
+                            Log.d(
+                                "livekit_metric",
+                                "livekit_metric: TrackPublished event. Track id: ${it.publication.sid}, kind: ${it.publication.track?.kind}, participant id: ${it.participant.sid}",
+                            )
+                        }
+
                         else -> {
                             Timber.e { "Room event: $it" }
                         }
@@ -255,20 +280,31 @@ class CallViewModel(
     private suspend fun connectToRoom() {
         try {
             room.e2eeOptions = getE2EEOptions()
+            room.videoTrackCaptureDefaults = LocalVideoTrackOptions(captureParams = VideoPreset169.H360.capture)
+
+            Log.d("livekit_metric", "livekit_metric: Preparing connection to room...")
+            room.prepareConnection(
+                url = url,
+                token = token,
+            )
+            Log.d("livekit_metric", "livekit_metric: Prepared connection")
+
+            Log.d("livekit_metric", "livekit_metric: Connecting to room...")
             room.connect(
                 url = url,
                 token = token,
             )
-
+            Log.d("livekit_metric", "livekit_metric: Connect response received")
             mutableEnhancedNsEnabled.postValue(room.audioProcessorIsEnabled)
             mutableEnableAudioProcessor.postValue(true)
 
             // Create and publish audio/video tracks
+            Log.d("livekit_metric", "livekit_metric: Publishing local tracks...")
             val localParticipant = room.localParticipant
             localParticipant.setMicrophoneEnabled(true)
 
             localParticipant.setCameraEnabled(true)
-
+            Log.d("livekit_metric", "livekit_metric: Publish successful")
             // Update the speaker
             handlePrimarySpeaker(emptyList(), emptyList(), room)
         } catch (e: Throwable) {
@@ -426,12 +462,12 @@ class CallViewModel(
         }
 
         while (isActive) {
-            Timber.d { "Stress test -> connect to first room" }
+            Log.d("livekit_metric", "Stress test -> connect to first room")
             launch(Dispatchers.IO) { quickConnectToRoom(firstToken) }
             delay(200)
             room.disconnect()
             delay(50)
-            Timber.d { "Stress test -> connect to second room" }
+            Log.d("livekit_metric", "Stress test -> connect to second room")
             launch(Dispatchers.IO) { quickConnectToRoom(secondToken) }
             delay(200)
             room.disconnect()

@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2024 LiveKit, Inc.
+ * Copyright 2023-2026 LiveKit, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package io.livekit.android.composesample.ui
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,7 @@ import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.RemoteVideoTrack
 import io.livekit.android.room.track.VideoTrack
 import livekit.org.webrtc.RendererCommon
+import kotlin.random.Random
 
 enum class ScaleType {
     FitInside,
@@ -62,7 +64,7 @@ fun VideoRenderer(
         Box(
             modifier = Modifier
                 .background(Color.Black)
-                .then(modifier)
+                .then(modifier),
         )
         return
     }
@@ -89,10 +91,17 @@ fun VideoRenderer(
         }
 
         cleanupVideoTrack()
-
         boundVideoTrack = videoTrack
+        val randomIntNumber = Random.nextInt(1000)
         if (videoTrack != null) {
             if (videoTrack is RemoteVideoTrack) {
+                Log.d("livekit_metric", "livekit_metric adding renderer to ${videoTrack.sid} random $randomIntNumber")
+                view.addFrameListener(
+                    { frame ->
+                        Log.d("livekit_metric", "livekit_metric Received first frame for ${videoTrack.sid} random $randomIntNumber: ${frame.width} x ${frame.height}")
+                    },
+                    1f,
+                )
                 videoTrack.addRenderer(view, videoSinkVisibility)
             } else {
                 videoTrack.addRenderer(view)
@@ -121,6 +130,7 @@ fun VideoRenderer(
     AndroidView(
         factory = { context ->
             TextureViewRenderer(context).apply {
+                Log.d("livekit_metric", "location 1 for setupVideoIfNeeded")
                 room.initVideoRenderer(this)
                 setupVideoIfNeeded(videoTrack, this)
 

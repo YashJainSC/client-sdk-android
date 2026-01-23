@@ -21,6 +21,7 @@ package io.livekit.android.room
 import android.content.Context
 import android.net.ConnectivityManager.NetworkCallback
 import android.net.Network
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -288,6 +289,13 @@ constructor(
     var e2eeOptions: E2EEOptions? = null
 
     /**
+     * UseSinglePeerConnection. Must be setup prior to [connect].
+     *
+     */
+    var useSinglePeerConnection: Boolean = false
+
+
+    /**
      * Default options to use when creating an audio track.
      */
     var audioTrackCaptureDefaults: LocalAudioTrackOptions by defaultsManager::audioTrackCaptureDefaults
@@ -366,6 +374,7 @@ constructor(
             adaptiveStream = adaptiveStream,
             dynacast = dynacast,
             e2eeOptions = e2eeOptions,
+            useSinglePeerConnection = useSinglePeerConnection,
             audioTrackCaptureDefaults = audioTrackCaptureDefaults,
             videoTrackCaptureDefaults = videoTrackCaptureDefaults,
             audioTrackPublishDefaults = audioTrackPublishDefaults,
@@ -616,6 +625,7 @@ constructor(
         adaptiveStream = options.adaptiveStream
         dynacast = options.dynacast
         e2eeOptions = options.e2eeOptions
+        useSinglePeerConnection = options.useSinglePeerConnection
     }
 
     /**
@@ -1166,17 +1176,29 @@ constructor(
      * @suppress
      */
     override fun onAddTrack(receiver: RtpReceiver, track: MediaStreamTrack, streams: Array<out MediaStream>) {
+        Log.d("livekit_metric", "onAddTrack called for ${streams.size} streams")
         if (streams.isEmpty()) {
             LKLog.i { "add track with empty streams?" }
             return
         }
 
         var (participantSid, streamId) = unpackStreamId(streams.first().id)
+
+        Log.d("livekit_metric", "onAddTrack called for $participantSid $streamId")
         var trackSid = track.id()
 
         if (streamId != null && streamId.startsWith("TR")) {
             trackSid = streamId
         }
+        if (!trackSid.startsWith("TR")) {
+            val id = engine.getTrackIdForReceiver(receiver)
+            if (id != null){
+                trackSid = id
+            } else {
+                LKLog.e { "Tried to add a track whose 'sid' could not be found for a participant, that's not present. Sid: ${participantSid}"}
+            }
+        }
+        Log.d("livekit_metric", "onAddTrack called for post trackId $participantSid $trackSid")
         val participant = getParticipantBySid(participantSid) as? RemoteParticipant
 
         if (participant == null) {

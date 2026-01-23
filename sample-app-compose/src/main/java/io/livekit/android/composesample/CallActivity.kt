@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2025 LiveKit, Inc.
+ * Copyright 2023-2026 LiveKit, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package io.livekit.android.composesample
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.os.Parcelable
+import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -71,6 +72,7 @@ import io.livekit.android.composesample.ui.SelectAudioDeviceDialog
 import io.livekit.android.composesample.ui.theme.AppTheme
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
+import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.sample.CallViewModel
 import io.livekit.android.sample.common.R
 import io.livekit.android.sample.model.StressTest
@@ -214,6 +216,7 @@ class CallActivity : AppCompatActivity() {
                     },
                 ) {
                     if (room != null && primarySpeaker != null) {
+                        Log.d("livekit_metric", "calling ParticipantItem from location 1 for ${primarySpeaker.sid}")
                         ParticipantItem(
                             room = room,
                             participant = primarySpeaker,
@@ -239,14 +242,19 @@ class CallActivity : AppCompatActivity() {
                             count = participants.size,
                             key = { index -> participants[index].sid.value },
                         ) { index ->
-                            ParticipantItem(
-                                room = room,
-                                participant = participants[index],
-                                isSpeaking = activeSpeakers.contains(participants[index]),
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .aspectRatio(1.0f, true),
-                            )
+                            val participantId = participants[index].sid
+                            val participant = participants[index]
+                            //if (participant is RemoteParticipant) {
+                                Log.d("livekit_metric", "calling ParticipantItem from location 2 for $participantId")
+                                ParticipantItem(
+                                    room = room,
+                                    participant = participants[index],
+                                    isSpeaking = activeSpeakers.contains(participants[index]),
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .aspectRatio(1.0f, true),
+                                )
+                            //}
                         }
                     }
                 }

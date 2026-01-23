@@ -93,21 +93,21 @@ class CallActivity : AppCompatActivity() {
             }
         }
 
-        // speaker view setup
-        val speakerAdapter = GroupieAdapter()
-        binding.speakerView.apply {
-            layoutManager = LinearLayoutManager(this@CallActivity, LinearLayoutManager.HORIZONTAL, false)
-            adapter = speakerAdapter
-        }
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.CREATED) {
-                viewModel.primarySpeaker.collectLatest { speaker ->
-                    val items = listOfNotNull(speaker)
-                        .map { participant -> ParticipantItem(viewModel.room, participant, speakerView = true) }
-                    speakerAdapter.update(items)
-                }
-            }
-        }
+//        // speaker view setup
+//        val speakerAdapter = GroupieAdapter()
+//        binding.speakerView.apply {
+//            layoutManager = LinearLayoutManager(this@CallActivity, LinearLayoutManager.HORIZONTAL, false)
+//            adapter = speakerAdapter
+//        }
+//        lifecycleScope.launch {
+//            repeatOnLifecycle(Lifecycle.State.CREATED) {
+//                viewModel.primarySpeaker.collectLatest { speaker ->
+//                    val items = listOfNotNull(speaker)
+//                        .map { participant -> ParticipantItem(viewModel.room, participant, speakerView = true) }
+//                    speakerAdapter.update(items)
+//                }
+//            }
+//        }
 
         // Controls setup
         lifecycleScope.launch {

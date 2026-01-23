@@ -27,17 +27,19 @@ import livekit.org.webrtc.CandidatePairChangeEvent
 import livekit.org.webrtc.DataChannel
 import livekit.org.webrtc.IceCandidate
 import livekit.org.webrtc.MediaStream
+import livekit.org.webrtc.MediaStreamTrack
 import livekit.org.webrtc.PeerConnection
 import livekit.org.webrtc.RtpReceiver
 import livekit.org.webrtc.RtpTransceiver
 import livekit.org.webrtc.SessionDescription
 
-internal class PublisherTransportObserver(
+class PublisherTransportObserver(
     private val engine: RTCEngine,
     private val client: SignalClient,
     private val rtcThreadToken: RTCThreadToken,
 ) : PeerConnection.Observer, PeerConnectionTransport.Listener, PeerConnectionStateObservable {
 
+    var dataChannelListener: ((DataChannel) -> Unit)? = null
     var connectionChangeListener: PeerConnectionStateListener? = null
 
     @FlowObservable
@@ -80,6 +82,12 @@ internal class PublisherTransportObserver(
         }
     }
 
+    override fun onDataChannel(channel: DataChannel) {
+        executeOnRTCThread(rtcThreadToken) {
+            dataChannelListener?.invoke(channel)
+        }
+    }
+
     override fun onSelectedCandidatePairChanged(event: CandidatePairChangeEvent?) {
     }
 
@@ -101,12 +109,19 @@ internal class PublisherTransportObserver(
     override fun onRemoveStream(p0: MediaStream?) {
     }
 
-    override fun onDataChannel(dataChannel: DataChannel?) {
+    override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
+        executeOnRTCThread(rtcThreadToken) {
+            val track = receiver.track() ?: return@executeOnRTCThread
+            LKLog.v { "onAddTrack: ${track.kind()}, ${track.id()}, ${streams.fold("") { sum, it -> "$sum, $it" }}" }
+            engine.listener?.onAddTrack(receiver, track, streams)
+        }
     }
 
-    override fun onTrack(transceiver: RtpTransceiver?) {
-    }
-
-    override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {
+    override fun onTrack(transceiver: RtpTransceiver) {
+        when (transceiver.mediaType) {
+            MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO -> LKLog.v { "peerconn started receiving audio" }
+            MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO -> LKLog.v { "peerconn started receiving video" }
+            else -> LKLog.d { "peerconn started receiving unknown media type: ${transceiver.mediaType}" }
+        }
     }
 }

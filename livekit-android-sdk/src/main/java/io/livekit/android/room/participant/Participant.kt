@@ -16,6 +16,7 @@
 
 package io.livekit.android.room.participant
 
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import io.livekit.android.dagger.InjectionNames
 import io.livekit.android.events.BroadcastEventBus
@@ -514,6 +515,7 @@ open class Participant(
         INGRESS,
         EGRESS,
         SIP,
+        CONNECTOR,
         UNKNOWN,
         ;
 
@@ -528,6 +530,7 @@ open class Participant(
                     LivekitModels.ParticipantInfo.Kind.INGRESS -> INGRESS
                     LivekitModels.ParticipantInfo.Kind.EGRESS -> EGRESS
                     LivekitModels.ParticipantInfo.Kind.SIP -> SIP
+                    LivekitModels.ParticipantInfo.Kind.CONNECTOR -> CONNECTOR
                     LivekitModels.ParticipantInfo.Kind.UNRECOGNIZED -> UNKNOWN
                 }
             }

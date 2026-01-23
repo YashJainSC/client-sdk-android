@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2025 LiveKit, Inc.
+ * Copyright 2023-2026 LiveKit, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package io.livekit.android.composesample
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.material.Icon
@@ -64,7 +65,7 @@ fun ParticipantItem(
             },
     ) {
         val (videoItem, identityBar, identityText, muteIndicator, connectionIndicator) = createRefs()
-
+        Log.d("livekit_metric", "ParticipantItem called for ${participant.sid} ${participant.identity}")
         VideoItemTrackSelector(
             room = room,
             participant = participant,

@@ -288,11 +288,13 @@ internal object RTCModule {
         videoEncoderFactoryOverride: VideoEncoderFactory?,
     ): VideoEncoderFactory {
         return videoEncoderFactoryOverride ?: if (videoHwAccel) {
-            CustomVideoEncoderFactory(
+            return CustomVideoEncoderFactory(
                 eglContext,
                 enableIntelVp8Encoder = true,
                 enableH264HighProfile = false,
-            )
+            ).apply {
+                setForceSWCodec(false)
+            }
         } else {
             SoftwareVideoEncoderFactory()
         }
@@ -332,7 +334,9 @@ internal object RTCModule {
         videoDecoderFactoryOverride: VideoDecoderFactory?,
     ): VideoDecoderFactory {
         return videoDecoderFactoryOverride ?: if (videoHwAccel) {
-            CustomVideoDecoderFactory(eglContext)
+            CustomVideoDecoderFactory(eglContext).apply {
+                setForceSWCodec(false)
+            }
         } else {
             SoftwareVideoDecoderFactory()
         }

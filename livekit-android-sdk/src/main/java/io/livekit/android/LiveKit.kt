@@ -1,5 +1,5 @@
 /*
- * Copyright 2023-2024 LiveKit, Inc.
+ * Copyright 2023-2026 LiveKit, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package io.livekit.android
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import io.livekit.android.dagger.DaggerLiveKitComponent
 import io.livekit.android.dagger.RTCModule
 import io.livekit.android.dagger.create
@@ -80,6 +81,7 @@ object LiveKit {
         options: RoomOptions = RoomOptions(),
         overrides: LiveKitOverrides = LiveKitOverrides(),
     ): Room {
+        Log.d("livekit_metric", "room create $options")
         val ctx = appContext.applicationContext
 
         if (ctx !is Application) {

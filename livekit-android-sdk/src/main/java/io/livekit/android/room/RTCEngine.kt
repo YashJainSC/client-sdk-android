@@ -17,6 +17,7 @@
 package io.livekit.android.room
 
 import android.os.SystemClock
+import android.util.Log
 import androidx.annotation.CheckResult
 import androidx.annotation.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -167,6 +168,7 @@ internal constructor(
     private var connectOptions: ConnectOptions? = null
     private var lastRoomOptions: RoomOptions? = null
     private var participantSid: String? = null
+    private var midToTrackId: Map<String, String>? = null
 
     internal val serverVersion: Semver?
         get() = client.serverVersion
@@ -174,11 +176,9 @@ internal constructor(
     internal val serverInfo: ServerInfo?
         get() = client.serverInfo
 
-    private val publisherObserver = PublisherTransportObserver(this, client, rtcThreadToken)
-    private val subscriberObserver = SubscriberTransportObserver(this, client, rtcThreadToken)
+    private val peerConnectionObserver = PublisherTransportObserver(this, client, rtcThreadToken)
 
-    internal var publisher: PeerConnectionTransport? = null
-    private var subscriber: PeerConnectionTransport? = null
+    internal var peerConnection: PeerConnectionTransport? = null
 
     private var reliableDataChannel: DataChannel? = null
     private var reliableDataChannelSub: DataChannel? = null
@@ -274,7 +274,7 @@ internal constructor(
             configurationLock.withCheckLock(
                 {
                     ensureActive()
-                    if (publisher != null && subscriber != null) {
+                    if (peerConnection != null) {
                         // already configured
                         return@launchBlockingOnRTCThread
                     }
@@ -289,17 +289,11 @@ internal constructor(
                 // Setup peer connections
                 val rtcConfig = makeRTCConfig(Either.Left(joinResponse), connectOptions)
 
-                publisher?.close()
-                publisher = pctFactory.create(
+                peerConnection?.close()
+                peerConnection = pctFactory.create(
                     rtcConfig,
-                    publisherObserver,
-                    publisherObserver,
-                )
-                subscriber?.close()
-                subscriber = pctFactory.create(
-                    rtcConfig,
-                    subscriberObserver,
-                    null,
+                    peerConnectionObserver,
+                    peerConnectionObserver,
                 )
 
                 val connectionStateListener: PeerConnectionStateListener = { newState ->
@@ -313,7 +307,7 @@ internal constructor(
 
                 if (joinResponse.subscriberPrimary) {
                     // in subscriber primary mode, server side opens sub data channels.
-                    subscriberObserver.dataChannelListener = onDataChannel@{ dataChannel: DataChannel ->
+                    peerConnectionObserver.dataChannelListener = onDataChannel@{ dataChannel: DataChannel ->
                         when (dataChannel.label()) {
                             RELIABLE_DATA_CHANNEL_LABEL -> reliableDataChannelSub = dataChannel
                             LOSSY_DATA_CHANNEL_LABEL -> lossyDataChannelSub = dataChannel
@@ -322,22 +316,22 @@ internal constructor(
                         dataChannel.registerObserver(DataChannelObserver(dataChannel))
                     }
 
-                    subscriberObserver.connectionChangeListener = connectionStateListener
+                    peerConnectionObserver.connectionChangeListener = connectionStateListener
                     // Also reconnect on publisher disconnect
-                    publisherObserver.connectionChangeListener = { newState ->
+                    peerConnectionObserver.connectionChangeListener = { newState ->
                         if (newState.isDisconnected()) {
                             reconnect()
                         }
                     }
                 } else {
-                    publisherObserver.connectionChangeListener = connectionStateListener
+                    peerConnectionObserver.connectionChangeListener = connectionStateListener
                 }
 
                 ensureActive()
                 // data channels
                 val reliableInit = DataChannel.Init()
                 reliableInit.ordered = true
-                reliableDataChannel = publisher?.withPeerConnection {
+                reliableDataChannel = peerConnection?.withPeerConnection {
                     createDataChannel(
                         RELIABLE_DATA_CHANNEL_LABEL,
                         reliableInit,
@@ -361,7 +355,7 @@ internal constructor(
                 val lossyInit = DataChannel.Init()
                 lossyInit.ordered = false
                 lossyInit.maxRetransmits = 0
-                lossyDataChannel = publisher?.withPeerConnection {
+                lossyDataChannel = peerConnection?.withPeerConnection {
                     createDataChannel(
                         LOSSY_DATA_CHANNEL_LABEL,
                         lossyInit,
@@ -411,7 +405,7 @@ internal constructor(
         rtcTrack: MediaStreamTrack,
         transInit: RtpTransceiverInit,
     ): RtpTransceiver? {
-        return publisher?.withPeerConnection {
+        return peerConnection?.withPeerConnection {
             addTransceiver(rtcTrack, transInit)
         }
     }
@@ -462,12 +456,9 @@ internal constructor(
         executeBlockingOnRTCThread(rtcThreadToken) {
             runBlocking {
                 configurationLock.withLock {
-                    publisherObserver.connectionChangeListener = null
-                    subscriberObserver.connectionChangeListener = null
-                    publisher?.closeBlocking()
-                    publisher = null
-                    subscriber?.closeBlocking()
-                    subscriber = null
+                    peerConnectionObserver.connectionChangeListener = null
+                    peerConnection?.closeBlocking()
+                    peerConnection = null
 
                     reliableBufferedAmountJob?.cancel()
                     reliableBufferedAmountJob = null
@@ -587,14 +578,13 @@ internal constructor(
                     }
                     connectionState = ConnectionState.RESUMING
                     LKLog.v { "Attempting soft reconnect." }
-                    subscriber?.prepareForIceRestart()
+                    peerConnection?.prepareForIceRestart()
                     try {
                         val response = client.reconnect(url!!, token, participantSid)
                         if (response is Either.Left) {
                             val reconnectResponse = response.value
                             val rtcConfig = makeRTCConfig(Either.Right(reconnectResponse), connectOptions)
-                            subscriber?.updateRTCConfig(rtcConfig)
-                            publisher?.updateRTCConfig(rtcConfig)
+                            peerConnection?.updateRTCConfig(rtcConfig)
                             lastMessageSeq = reconnectResponse.lastMessageSeq
                         }
                         client.onReadyForResponses()
@@ -624,17 +614,17 @@ internal constructor(
                 var publisherWaitJob: Job? = null
                 if (hasPublished) {
                     publisherWaitJob = launch {
-                        publisherObserver.waitUntilConnected()
+                        peerConnectionObserver.waitUntilConnected()
                     }
                 }
 
-                // wait until subscriber ICE connected
-                val subscriberWaitJob = launch {
-                    subscriberObserver.waitUntilConnected()
-                }
+//                // wait until subscriber ICE connected
+//                val subscriberWaitJob = launch {
+//                    peerConnectionObserver.waitUntilConnected()
+//                }
 
                 withTimeoutOrNull(MAX_ICE_CONNECT_TIMEOUT_MS.toLong()) {
-                    listOfNotNull(publisherWaitJob, subscriberWaitJob)
+                    listOfNotNull(publisherWaitJob)
                         .joinAll()
                 }
 
@@ -645,7 +635,7 @@ internal constructor(
                 }
 
                 if (connectionState == ConnectionState.CONNECTED &&
-                    (!hasPublished || publisher?.isConnected() == true)
+                    (!hasPublished || peerConnection?.isConnected() == true)
                 ) {
                     if (lastMessageSeq != null) {
                         resendReliableMessagesForResume(lastMessageSeq)
@@ -687,7 +677,8 @@ internal constructor(
 
         coroutineScope.launch {
             negotiatePublisherMutex.withLock {
-                publisher?.negotiate?.invoke(getPublisherOfferConstraints())
+                Log.d("livekit_metric", "initiated negotiate inside negotiatePublisher")
+                peerConnection?.negotiate?.invoke(getPublisherOfferConstraints())
             }
         }
     }
@@ -801,12 +792,12 @@ internal constructor(
             return
         }
 
-        if (publisher == null) {
+        if (peerConnection == null) {
             throw RoomException.ConnectException("Publisher isn't setup yet! Is room not connected?!")
         }
 
-        if (publisher?.isConnected() != true &&
-            publisher?.iceConnectionState() != PeerConnection.IceConnectionState.CHECKING
+        if (peerConnection?.isConnected() != true &&
+            peerConnection?.iceConnectionState() != PeerConnection.IceConnectionState.CHECKING
         ) {
             // start negotiation
             this.negotiatePublisher()
@@ -820,7 +811,7 @@ internal constructor(
         // wait until publisher ICE connected
         val endTime = SystemClock.elapsedRealtime() + MAX_ICE_CONNECT_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < endTime) {
-            if (publisher?.isConnected() == true && targetChannel.state() == DataChannel.State.OPEN) {
+            if (peerConnection?.isConnected() == true && targetChannel.state() == DataChannel.State.OPEN) {
                 return
             }
             delay(50)
@@ -842,13 +833,13 @@ internal constructor(
                 add(
                     MediaConstraints.KeyValuePair(
                         MediaConstraintKeys.OFFER_TO_RECV_AUDIO,
-                        MediaConstraintKeys.FALSE,
+                        MediaConstraintKeys.TRUE,
                     ),
                 )
                 add(
                     MediaConstraints.KeyValuePair(
                         MediaConstraintKeys.OFFER_TO_RECV_VIDEO,
-                        MediaConstraintKeys.FALSE,
+                        MediaConstraintKeys.TRUE,
                     ),
                 )
                 if (connectionState == ConnectionState.RECONNECTING || connectionState == ConnectionState.RESUMING) {
@@ -997,10 +988,12 @@ internal constructor(
 
     // ---------------------------------- SignalClient.Listener --------------------------------------//
 
-    override fun onServerAnswer(sessionDescription: SessionDescription, offerId: Int) {
-        LKLog.v { "received server answer: ${sessionDescription.type}, ${runBlocking { publisher?.signalingState() }}" }
+    override fun onServerAnswer(sessionDescription: SessionDescription, offerId: Int, midToTrackIdMap: Map<String, String>) {
+        LKLog.v { "received server answer: ${sessionDescription.type}, ${runBlocking { peerConnection?.signalingState() }}" }
         coroutineScope.launch {
-            when (val outcome = publisher?.setRemoteDescription(sessionDescription, offerId).nullSafe()) {
+            midToTrackId = midToTrackIdMap
+            Log.d("livekit_metric", "new midtotrackIdmap $midToTrackIdMap")
+            when (val outcome = peerConnection?.setRemoteDescription(sessionDescription, offerId).nullSafe()) {
                 is Either.Left -> {
                     // do nothing.
                 }
@@ -1012,11 +1005,12 @@ internal constructor(
         }
     }
 
-    override fun onServerOffer(sessionDescription: SessionDescription, offerId: Int) {
-        LKLog.v { "received server offer: ${sessionDescription.type}, ${runBlocking { publisher?.signalingState() }}" }
+    override fun onServerOffer(sessionDescription: SessionDescription, offerId: Int, midToTrackIdMap: Map<String, String>) {
+        LKLog.v { "received server offer: ${sessionDescription.type}, ${runBlocking { peerConnection?.signalingState() }}" }
         coroutineScope.launch {
             run {
-                when (val outcome = subscriber?.setRemoteDescription(sessionDescription, offerId).nullSafe()) {
+                midToTrackId = midToTrackIdMap
+                when (val outcome = peerConnection?.setRemoteDescription(sessionDescription, offerId).nullSafe()) {
                     is Either.Right -> {
                         LKLog.e { "error setting remote description for offer: ${outcome.value} " }
                         return@launch
@@ -1031,7 +1025,7 @@ internal constructor(
             }
 
             val answer = run {
-                when (val outcome = subscriber?.withPeerConnection { createAnswer(MediaConstraints()) }.nullSafe()) {
+                when (val outcome = peerConnection?.withPeerConnection { createAnswer(MediaConstraints()) }.nullSafe()) {
                     is Either.Left -> outcome.value
                     is Either.Right -> {
                         LKLog.e { "error creating answer: ${outcome.value}" }
@@ -1045,7 +1039,7 @@ internal constructor(
             }
 
             run<Unit> {
-                when (val outcome = subscriber?.withPeerConnection { setLocalDescription(answer) }.nullSafe()) {
+                when (val outcome = peerConnection?.withPeerConnection { setLocalDescription(answer) }.nullSafe()) {
                     is Either.Left -> Unit
                     is Either.Right -> {
                         LKLog.e { "error setting local description for answer: ${outcome.value}" }
@@ -1065,12 +1059,12 @@ internal constructor(
         LKLog.v { "received ice candidate from peer: $candidate, $target" }
         when (target) {
             LivekitRtc.SignalTarget.PUBLISHER -> {
-                publisher?.addIceCandidate(candidate)
+                peerConnection?.addIceCandidate(candidate)
                     ?: LKLog.w { "received candidate for publisher when we don't have one. ignoring." }
             }
 
             LivekitRtc.SignalTarget.SUBSCRIBER -> {
-                subscriber?.addIceCandidate(candidate)
+                peerConnection?.addIceCandidate(candidate)
                     ?: LKLog.w { "received candidate for subscriber when we don't have one. ignoring." }
             }
 
@@ -1102,6 +1096,44 @@ internal constructor(
 
     override fun onLocalTrackSubscribed(trackSubscribed: LivekitRtc.TrackSubscribed) {
         listener?.onLocalTrackSubscribed(trackSubscribed)
+    }
+
+    override fun onMediaSectionsRequirement(mediaSectionsRequirement: LivekitRtc.MediaSectionsRequirement) {
+        coroutineScope.launch {
+            // Use the same mutex as negotiatePublisher to prevent race conditions
+            negotiatePublisherMutex.withLock {
+                val requiredAudios = mediaSectionsRequirement.numAudios
+                val requiredVideos = mediaSectionsRequirement.numVideos
+
+                val currentAudios = peerConnection?.countTransceiversOfKind(
+                    MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO,
+                    RtpTransceiver.RtpTransceiverDirection.RECV_ONLY,
+                ) ?: 0
+                val currentVideos = peerConnection?.countTransceiversOfKind(
+                    MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+                    RtpTransceiver.RtpTransceiverDirection.RECV_ONLY,
+                ) ?: 0
+
+                val audiosToAdd = (requiredAudios - currentAudios).coerceAtLeast(0)
+                val videosToAdd = (requiredVideos - currentVideos).coerceAtLeast(0)
+
+                if (audiosToAdd == 0 && videosToAdd == 0) {
+                    // Already have enough transceivers, no need to renegotiate
+                    return@launch
+                }
+                for (i in 0 until audiosToAdd) {
+                    val rtpTransceiverInit = RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
+                    peerConnection?.addPublisherTransceiverOfKind(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, rtpTransceiverInit)
+                }
+                for (i in 0 until videosToAdd) {
+                    val rtpTransceiverInit = RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
+                    peerConnection?.addPublisherTransceiverOfKind(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, rtpTransceiverInit)
+                }
+                Log.d("livekit_metric", "initiated negotiate from inside: onMediaSectionsRequirement $currentVideos $videosToAdd $currentAudios $audiosToAdd")
+                // Negotiate with the transceivers we just added
+                peerConnection?.negotiate?.invoke(null)
+            }
+        }
     }
 
     override fun onParticipantUpdate(updates: List<LivekitModels.ParticipantInfo>) {
@@ -1311,7 +1343,7 @@ internal constructor(
         var answer: LivekitRtc.SessionDescription? = null
         var offer: LivekitRtc.SessionDescription? = null
         runBlocking {
-            subscriber?.withPeerConnection {
+            peerConnection?.withPeerConnection {
                 answer = localDescription?.toProtoSessionDescription()
                 offer = remoteDescription?.toProtoSessionDescription()
             }
@@ -1356,20 +1388,20 @@ internal constructor(
 
     fun getPublisherRTCStats(callback: RTCStatsCollectorCallback) {
         runBlocking {
-            publisher?.withPeerConnection { getStats(callback) }
+            peerConnection?.withPeerConnection { getStats(callback) }
                 ?: callback.onStatsDelivered(RTCStatsReport(0, emptyMap()))
         }
     }
 
     fun getSubscriberRTCStats(callback: RTCStatsCollectorCallback) {
         runBlocking {
-            subscriber?.withPeerConnection { getStats(callback) }
+            peerConnection?.withPeerConnection { getStats(callback) }
                 ?: callback.onStatsDelivered(RTCStatsReport(0, emptyMap()))
         }
     }
 
     fun createStatsGetter(sender: RtpSender): RTCStatsGetter {
-        val p = publisher
+        val p = peerConnection
         return { statsCallback: RTCStatsCollectorCallback ->
             runBlocking {
                 p?.withPeerConnection {
@@ -1380,7 +1412,7 @@ internal constructor(
     }
 
     fun createStatsGetter(receiver: RtpReceiver): RTCStatsGetter {
-        val p = subscriber
+        val p = peerConnection
         return { statsCallback: RTCStatsCollectorCallback ->
             runBlocking {
                 p?.withPeerConnection {
@@ -1390,13 +1422,19 @@ internal constructor(
         }
     }
 
+    fun getTrackIdForReceiver(receiver: RtpReceiver): String? {
+        val mid = peerConnection?.getMidForReceiver(receiver) ?: return null
+        Log.d("livekit_metric", "getTrackIdForReceiver called for $mid and result is $midToTrackId?.get(mid)")
+        return midToTrackId?.get(mid)
+    }
+
     internal fun registerTrackBitrateInfo(cid: String, trackBitrateInfo: TrackBitrateInfo) {
-        publisher?.registerTrackBitrateInfo(cid, trackBitrateInfo)
+        peerConnection?.registerTrackBitrateInfo(cid, trackBitrateInfo)
     }
 
     internal fun removeTrack(rtcTrack: MediaStreamTrack) {
         runBlocking {
-            publisher?.withPeerConnection {
+            peerConnection?.withPeerConnection {
                 val senders = this.senders
                 for (sender in senders) {
                     val t = sender.track() ?: continue
@@ -1410,11 +1448,11 @@ internal constructor(
 
     @VisibleForTesting
     fun getPublisherPeerConnection() =
-        publisher!!.peerConnection
+        peerConnection!!.peerConnection
 
     @VisibleForTesting
     fun getSubscriberPeerConnection() =
-        subscriber!!.peerConnection
+        peerConnection!!.peerConnection
 }
 
 /**

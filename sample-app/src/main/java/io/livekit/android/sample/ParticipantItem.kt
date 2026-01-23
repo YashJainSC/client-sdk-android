@@ -1,5 +1,5 @@
 /*
- * Copyright 2024-2025 LiveKit, Inc.
+ * Copyright 2024-2026 LiveKit, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 
 package io.livekit.android.sample
 
+import android.util.Log
 import android.view.View
-import com.github.ajalt.timberkt.Timber
 import com.xwray.groupie.viewbinding.BindableItem
 import com.xwray.groupie.viewbinding.GroupieViewHolder
 import io.livekit.android.room.Room
@@ -53,6 +53,7 @@ class ParticipantItem(
     private var coroutineScope: CoroutineScope? = null
 
     override fun initializeViewBinding(view: View): ParticipantItemBinding {
+        Log.d("livekit_metric", "ParticipantItem created for ${participant.sid}")
         val binding = ParticipantItemBinding.bind(view)
         room.initVideoRenderer(binding.renderer)
 
@@ -152,9 +153,16 @@ class ParticipantItem(
         if (boundVideoTrack == videoTrack) {
             return
         }
+        Log.d("livekit_metric", "setupVideoIfNeeded called. boundVideoTrack: $boundVideoTrack, new videoTrack: $videoTrack")
         boundVideoTrack?.removeRenderer(viewBinding.renderer)
         boundVideoTrack = videoTrack
-        Timber.v { "adding renderer to $videoTrack" }
+        Log.d("livekit_metric", "adding renderer to $videoTrack")
+        viewBinding.renderer.addFrameListener(
+            { frame ->
+                Log.d("livekit_metric", "Received first frame: ${frame.width} x ${frame.height}")
+            },
+            1f,
+        )
         videoTrack?.addRenderer(viewBinding.renderer)
     }
 

@@ -18,6 +18,7 @@ package io.livekit.android.room
 
 import android.javax.sdp.MediaDescription
 import android.javax.sdp.SdpFactory
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -50,10 +51,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import livekit.org.webrtc.IceCandidate
 import livekit.org.webrtc.MediaConstraints
+import livekit.org.webrtc.MediaStreamTrack
 import livekit.org.webrtc.PeerConnection
 import livekit.org.webrtc.PeerConnection.RTCConfiguration
 import livekit.org.webrtc.PeerConnection.SignalingState
 import livekit.org.webrtc.PeerConnectionFactory
+import livekit.org.webrtc.RtpReceiver
 import livekit.org.webrtc.RtpTransceiver
 import livekit.org.webrtc.SessionDescription
 import java.util.concurrent.atomic.AtomicBoolean
@@ -118,6 +121,38 @@ constructor(
         }
     }
 
+    fun addPublisherTransceiverOfKind(kind: MediaStreamTrack.MediaType, transceiverInit: RtpTransceiver.RtpTransceiverInit) {
+        executeRTCIfNotClosed {
+            peerConnection.addTransceiver(kind, transceiverInit)
+        }
+    }
+
+    fun countTransceiversOfKind(kind: MediaStreamTrack.MediaType, direction: RtpTransceiver.RtpTransceiverDirection): Int {
+        return executeRTCIfNotClosed {
+            peerConnection.transceivers.count { transceiver ->
+                transceiver.mediaType == kind && transceiver.direction == direction
+            }
+        } ?: 0
+    }
+
+    fun getMidForReceiver(rtpReceiver: RtpReceiver): String? {
+        return executeRTCIfNotClosed {
+            val transceivers = peerConnection.transceivers
+            val receiverId = rtpReceiver.id()
+            Log.d("livekit_metric", "getMidForReceiver called for receiver id=$receiverId, transceivers count=${transceivers.size}")
+
+            // Log all transceiver receiver IDs for debugging
+            transceivers.forEachIndexed { index, transceiver ->
+                Log.d("livekit_metric", "  transceiver[$index]: receiverId=${transceiver.receiver.id()}, mid=${transceiver.mid}, direction=${transceiver.direction}")
+            }
+
+            // Try matching by receiver ID instead of object identity
+            val matchingTransceiver = transceivers.find { it.receiver.id() == receiverId }
+            Log.d("livekit_metric", "matchingTransceiver found=${matchingTransceiver != null}, mid=${matchingTransceiver?.mid}")
+            matchingTransceiver?.mid
+        }
+    }
+
     suspend fun setRemoteDescription(sd: SessionDescription, offerId: Int): Either<Unit, String?> {
         val result = launchRTCIfNotClosed {
             val currentOfferId = latestOfferId.get()
@@ -137,6 +172,7 @@ constructor(
 
         if (this.renegotiate) {
             this.renegotiate = false
+            Log.d("livekit_metric", "createAndSendOffer location 1")
             this.createAndSendOffer()
         }
 
@@ -145,15 +181,19 @@ constructor(
 
     val negotiate = debounce<MediaConstraints?, Unit>(20, coroutineScope) {
         if (it != null) {
+            Log.d("livekit_metric", "createAndSendOffer location 2")
             createAndSendOffer(it)
         } else {
+            Log.d("livekit_metric", "createAndSendOffer location 3")
             createAndSendOffer()
         }
     }
 
     private val offerLock = Mutex()
     private suspend fun createAndSendOffer(constraints: MediaConstraints = MediaConstraints()) {
+        Log.d("livekit_metric", "createAndSendOffer waiting on lock")
         offerLock.withLock {
+            Log.d("livekit_metric", "createAndSendOffer lock acquired")
             if (listener == null) {
                 return
             }

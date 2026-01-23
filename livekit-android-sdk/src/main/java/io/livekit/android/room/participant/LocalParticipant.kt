@@ -669,7 +669,7 @@ internal constructor(
 
         // For fast publish, we can negotiate PC and request add track at the same time
         suspend fun negotiate() {
-            if (this.engine.publisher == null) {
+            if (this.engine.peerConnection == null) {
                 throw IllegalStateException("publisher is not configured yet!")
             }
 

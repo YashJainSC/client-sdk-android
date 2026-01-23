@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 LiveKit, Inc.
+ * Copyright 2024-2026 LiveKit, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,6 +66,25 @@ class MainActivity : AppCompatActivity() {
                 room.events.collect { event ->
                     when (event) {
                         is RoomEvent.TrackSubscribed -> onTrackSubscribed(event)
+                        is RoomEvent.Connected -> {
+                            Log.d("livekit_metric", "RoomEvent.Connected event received")
+                        }
+
+                        is RoomEvent.ParticipantConnected -> {
+                            Log.d("livekit_metric", "ParticipantConnected id: ${event.participant.sid}")
+                        }
+
+                        is RoomEvent.ParticipantDisconnected -> {
+                            Log.d("livekit_metric", "ParticipantDisconnected id: ${event.participant.sid}")
+                        }
+
+                        is RoomEvent.TrackPublished -> {
+                            Log.d(
+                                "livekit_metric",
+                                "TrackPublished event. Track id: ${event.publication.sid}, kind: ${event.publication.track?.kind}, participant id: ${event.participant.sid}",
+                            )
+                        }
+
                         else -> {}
                     }
                 }
@@ -73,19 +92,24 @@ class MainActivity : AppCompatActivity() {
 
             // Connect to server.
             try {
+                Log.d("livekit_metric", "Connecting to room...")
                 room.connect(
                     url,
                     token,
                 )
+                Log.d("livekit_metric", "Connect response received")
             } catch (e: Exception) {
                 Log.e("MainActivity", "Error while connecting to server:", e)
                 return@launch
             }
 
             // Turn on audio/video recording.
+            Log.d("livekit_metric", "Publishing local tracks...")
+
             val localParticipant = room.localParticipant
             localParticipant.setMicrophoneEnabled(true)
             localParticipant.setCameraEnabled(true)
+            Log.d("livekit_metric", "Publish successful")
 
             // Attach local video camera
             val localTrack = localParticipant.getTrackPublication(Track.Source.CAMERA)?.track as? LocalVideoTrack
@@ -112,7 +136,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun attachVideo(videoTrack: VideoTrack) {
-        videoTrack.addRenderer(findViewById<SurfaceViewRenderer>(R.id.renderer))
+        Log.d("livekit_metric", "attachVideo called. videoTrack: ${videoTrack.sid}")
+
+        val renderer = findViewById<SurfaceViewRenderer>(R.id.renderer)
+        renderer.addFrameListener(
+            { frame ->
+                Log.d("livekit_metric", "Received first frame: ${frame.width} x ${frame.height}")
+            },
+            1f,
+        )
+        Log.d("livekit_metric", "adding renderer to $videoTrack")
+        videoTrack.addRenderer(renderer)
         findViewById<View>(R.id.progress).visibility = View.GONE
     }
 
