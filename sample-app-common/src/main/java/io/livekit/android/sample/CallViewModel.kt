@@ -21,6 +21,7 @@ import android.app.Application
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.lifecycle.AndroidViewModel
@@ -30,6 +31,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.github.ajalt.timberkt.Timber
 import io.livekit.android.AudioOptions
+import io.livekit.android.ConnectOptions
 import io.livekit.android.LiveKit
 import io.livekit.android.LiveKitOverrides
 import io.livekit.android.RoomOptions
@@ -47,7 +49,9 @@ import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.room.track.CameraPosition
 import io.livekit.android.room.track.LocalScreencastVideoTrack
 import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.VideoPreset169
 import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import io.livekit.android.room.track.video.CameraCapturerUtils
 import io.livekit.android.sample.model.StressTest
@@ -92,6 +96,8 @@ class CallViewModel(
             adaptiveStream = true,
             dynacast = true,
             e2eeOptions = getE2EEOptions(),
+            useSinglePeerConnection = false,
+            videoTrackCaptureDefaults = LocalVideoTrackOptions(captureParams = VideoPreset169.H360.capture)
         )
     }
 
@@ -189,6 +195,9 @@ class CallViewModel(
                 room.events.collect {
                     when (it) {
                         is RoomEvent.FailedToConnect -> mutableError.value = it.error
+                        is RoomEvent.Connected -> {
+                            Log.d("livekit_metric", "RoomEvent.Connected received")
+                        }
                         is RoomEvent.DataReceived -> {
                             // Handling basic data packets.
                             val identity = it.participant?.identity ?: "server"
@@ -255,10 +264,13 @@ class CallViewModel(
     private suspend fun connectToRoom() {
         try {
             room.e2eeOptions = getE2EEOptions()
+            Log.d("livekit_metric", "connecting to room")
             room.connect(
                 url = url,
                 token = token,
+                options = ConnectOptions(audio = true, video = true)
             )
+            Log.d("livekit_metric", "connected response received")
 
             mutableEnhancedNsEnabled.postValue(room.audioProcessorIsEnabled)
             mutableEnableAudioProcessor.postValue(true)

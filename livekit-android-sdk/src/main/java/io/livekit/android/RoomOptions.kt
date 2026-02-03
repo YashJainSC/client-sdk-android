@@ -39,6 +39,11 @@ data class RoomOptions(
      */
     val e2eeOptions: E2EEOptions? = null,
 
+    /**
+     * @see [Room.useSinglePeerConnection]
+     */
+    val useSinglePeerConnection: Boolean = false,
+
     val audioTrackCaptureDefaults: LocalAudioTrackOptions? = null,
     val videoTrackCaptureDefaults: LocalVideoTrackOptions? = null,
     val audioTrackPublishDefaults: AudioTrackPublishDefaults? = null,

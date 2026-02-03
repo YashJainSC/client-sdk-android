@@ -16,6 +16,7 @@
 
 package io.livekit.android.room
 
+import android.util.Log
 import io.livekit.android.room.util.PeerConnectionStateObservable
 import io.livekit.android.util.FlowObservable
 import io.livekit.android.util.LKLog
@@ -27,6 +28,7 @@ import livekit.org.webrtc.CandidatePairChangeEvent
 import livekit.org.webrtc.DataChannel
 import livekit.org.webrtc.IceCandidate
 import livekit.org.webrtc.MediaStream
+import livekit.org.webrtc.MediaStreamTrack
 import livekit.org.webrtc.PeerConnection
 import livekit.org.webrtc.RtpReceiver
 import livekit.org.webrtc.RtpTransceiver
@@ -55,6 +57,7 @@ internal class PublisherTransportObserver(
 
     override fun onRenegotiationNeeded() {
         executeOnRTCThread(rtcThreadToken) {
+            Log.d("PublisherTransportObserver", "onRenegotiationNeeded")
             engine.negotiatePublisher()
         }
     }
@@ -105,8 +108,24 @@ internal class PublisherTransportObserver(
     }
 
     override fun onTrack(transceiver: RtpTransceiver?) {
+        val track = transceiver?.receiver?.track() ?: return
+        when (track.kind()) {
+            MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO.name.lowercase() ->
+                LKLog.v { "peerconn started receiving audio" }
+            MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO.name.lowercase() ->
+                LKLog.v { "peerconn started receiving video" }
+            else ->
+                LKLog.d { "peerconn started receiving unknown media type: ${track.kind()}" }
+        }
     }
 
     override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {
+        executeOnRTCThread(rtcThreadToken) {
+            val receiver = p0 ?: return@executeOnRTCThread
+            val track = receiver.track() ?: return@executeOnRTCThread
+            val streams = p1 ?: emptyArray()
+            LKLog.v { "onAddTrack: ${track.kind()}, ${track.id()}, ${streams.fold("") { sum, it -> "$sum, $it" }}" }
+            engine.listener?.onAddTrack(receiver, track, streams)
+        }
     }
 }

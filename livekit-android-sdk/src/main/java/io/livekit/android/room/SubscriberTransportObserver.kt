@@ -16,6 +16,7 @@
 
 package io.livekit.android.room
 
+import android.util.Log
 import io.livekit.android.room.util.PeerConnectionStateObservable
 import io.livekit.android.util.FlowObservable
 import io.livekit.android.util.LKLog
@@ -115,5 +116,6 @@ class SubscriberTransportObserver(
     }
 
     override fun onRenegotiationNeeded() {
+        Log.d("PublisherTransportObserver", "onRenegotiationNeeded")
     }
 }

@@ -18,6 +18,7 @@ package io.livekit.android.room
 
 import android.javax.sdp.MediaDescription
 import android.javax.sdp.SdpFactory
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -54,6 +55,7 @@ import livekit.org.webrtc.PeerConnection
 import livekit.org.webrtc.PeerConnection.RTCConfiguration
 import livekit.org.webrtc.PeerConnection.SignalingState
 import livekit.org.webrtc.PeerConnectionFactory
+import livekit.org.webrtc.RtpReceiver
 import livekit.org.webrtc.RtpTransceiver
 import livekit.org.webrtc.SessionDescription
 import java.util.concurrent.atomic.AtomicBoolean
@@ -115,6 +117,24 @@ constructor(
     suspend fun <T> withPeerConnection(action: suspend PeerConnection.() -> T): T? {
         return launchRTCIfNotClosed {
             action(peerConnection)
+        }
+    }
+
+    fun getMidForReceiver(rtpReceiver: RtpReceiver): String? {
+        return executeRTCIfNotClosed {
+            val transceivers = peerConnection.transceivers
+            val receiverId = rtpReceiver.id()
+            Log.d("livekit_metric", "getMidForReceiver called for receiver id=$receiverId, transceivers count=${transceivers.size}")
+
+            // Log all transceiver receiver IDs for debugging
+            transceivers.forEachIndexed { index, transceiver ->
+                Log.d("livekit_metric", "  transceiver[$index]: receiverId=${transceiver.receiver.id()}, mid=${transceiver.mid}, direction=${transceiver.direction}")
+            }
+
+            // Try matching by receiver ID instead of object identity
+            val matchingTransceiver = transceivers.find { it.receiver.id() == receiverId }
+            Log.d("livekit_metric", "matchingTransceiver found=${matchingTransceiver != null}, mid=${matchingTransceiver?.mid}")
+            matchingTransceiver?.mid
         }
     }
 

@@ -16,6 +16,7 @@
 
 package io.livekit.android.room
 
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import com.vdurmont.semver4j.Semver
 import io.livekit.android.ConnectOptions
@@ -58,6 +59,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import java.util.Base64
 import java.util.Date
 import javax.inject.Inject
 import javax.inject.Named
@@ -136,8 +138,9 @@ constructor(
         token: String,
         options: ConnectOptions = ConnectOptions(),
         roomOptions: RoomOptions = RoomOptions(),
+        publisherOffer: LivekitRtc.SessionDescription? = null,
     ): JoinResponse {
-        val joinResponse = connect(url, token, options, roomOptions)
+        val joinResponse = connect(url, token, options, roomOptions, publisherOffer)
         return (joinResponse as Either.Left).value
     }
 
@@ -165,11 +168,18 @@ constructor(
         token: String,
         options: ConnectOptions,
         roomOptions: RoomOptions,
+        publisherOffer: LivekitRtc.SessionDescription? = null,
     ): Either<JoinResponse, Either<ReconnectResponse, Unit>> {
         // Clean up any pre-existing connection.
         close(reason = "Starting new connection", shouldClearQueuedRequests = false)
 
-        val wsUrlString = "${url.toWebsocketUrl()}/rtc" + createConnectionParams(getClientInfo(), options, roomOptions)
+        var wsUrlString = "${url.toWebsocketUrl()}/rtc"
+        if (roomOptions.useSinglePeerConnection || publisherOffer != null) {
+            wsUrlString += createJoinRequestConnectionParams(getClientInfo(), options, roomOptions, publisherOffer)
+        } else {
+            wsUrlString += createConnectionParams(getClientInfo(), options, roomOptions)
+        }
+
         isReconnecting = options.reconnect
 
         LKLog.i { "connecting to $wsUrlString" }
@@ -220,6 +230,42 @@ constructor(
         queryParams.add(CONNECT_QUERY_OS_VERSION to clientInfo.osVersion)
         queryParams.add(CONNECT_QUERY_NETWORK_TYPE to networkInfo.getNetworkType().protoName)
 
+        return queryParams.foldIndexed("") { index, acc, pair ->
+            val separator = if (index == 0) "?" else "&"
+            acc + separator + "${pair.first}=${pair.second}"
+        }
+    }
+
+    private fun createJoinRequestConnectionParams(
+        clientInfo: LivekitModels.ClientInfo,
+        options: ConnectOptions,
+        roomOptions: RoomOptions,
+        publisherOffer: LivekitRtc.SessionDescription? = null,
+    ): String {
+        val connectionSettings = LivekitRtc.ConnectionSettings.newBuilder().apply {
+            this.adaptiveStream = roomOptions.adaptiveStream
+            this.autoSubscribe = options.autoSubscribe
+        }.build()
+
+        val joinRequest = LivekitRtc.JoinRequest.newBuilder().apply {
+            this.connectionSettings = connectionSettings
+            this.clientInfo = clientInfo
+            this.reconnect = options.reconnect
+            if (options.participantSid != null){
+                this.participantSid = options.participantSid
+            }
+            if (publisherOffer != null) {
+                this.publisherOffer = publisherOffer
+            }
+        }.build()
+
+        val wrappedJoinRequest = LivekitRtc.WrappedJoinRequest.newBuilder()
+            .setJoinRequest(joinRequest.toByteString())
+            .build()
+        val bytes: ByteArray = wrappedJoinRequest.toByteArray()
+        val base64JoinRequest = Base64.getEncoder().encodeToString(bytes)
+        val queryParams = mutableListOf<Pair<String, String>>()
+        queryParams.add(CONNECT_QUERY_JOIN_REQUEST to base64JoinRequest)
         return queryParams.foldIndexed("") { index, acc, pair ->
             val separator = if (index == 0) "?" else "&"
             acc + separator + "${pair.first}=${pair.second}"
@@ -692,15 +738,17 @@ constructor(
 
         when (response.messageCase) {
             LivekitRtc.SignalResponse.MessageCase.ANSWER -> {
+                Log.d("livekit_metric", "on answer ${response.offer.midToTrackId} ${response.offer.midToTrackIdMap}")
                 val sd = fromProtoSessionDescription(response.answer)
                 val offerId = response.answer.id
-                listener?.onServerAnswer(sd, offerId)
+                listener?.onServerAnswer(sd, offerId, response.answer.midToTrackIdMap)
             }
 
             LivekitRtc.SignalResponse.MessageCase.OFFER -> {
+                Log.d("livekit_metric", "on offer ${response.offer.midToTrackId} ${response.offer.midToTrackIdMap}")
                 val sd = fromProtoSessionDescription(response.offer)
                 val offerId = response.offer.id
-                listener?.onServerOffer(sd, offerId)
+                listener?.onServerOffer(sd, offerId, response.offer.midToTrackIdMap)
             }
 
             LivekitRtc.SignalResponse.MessageCase.TRICKLE -> {
@@ -719,10 +767,12 @@ constructor(
             }
 
             LivekitRtc.SignalResponse.MessageCase.TRACK_SUBSCRIBED -> {
+                Log.d("livekit_metric", "on track subscribed ${response.trackSubscribed}")
                 listener?.onLocalTrackSubscribed(response.trackSubscribed)
             }
 
             LivekitRtc.SignalResponse.MessageCase.TRACK_PUBLISHED -> {
+                Log.d("livekit_metric", "on track published ${response.trackPublished}")
                 listener?.onLocalTrackPublished(response.trackPublished)
             }
 
@@ -806,7 +856,8 @@ constructor(
             }
 
             LivekitRtc.SignalResponse.MessageCase.MEDIA_SECTIONS_REQUIREMENT -> {
-                // TODO
+                Log.d("livekit_metric", "on media sections requirement videos: ${response.mediaSectionsRequirement.numVideos} audios: ${response.mediaSectionsRequirement.numAudios}")
+                listener?.onMediaSectionsRequirement(response.mediaSectionsRequirement)
             }
 
             LivekitRtc.SignalResponse.MessageCase.SUBSCRIBED_AUDIO_CODEC_UPDATE -> {
@@ -879,8 +930,8 @@ constructor(
     }
 
     interface Listener {
-        fun onServerAnswer(sessionDescription: SessionDescription, offerId: Int)
-        fun onServerOffer(sessionDescription: SessionDescription, offerId: Int)
+        fun onServerAnswer(sessionDescription: SessionDescription, offerId: Int, midToTrackIdMap: Map<String, String>)
+        fun onServerOffer(sessionDescription: SessionDescription, offerId: Int, midToTrackIdMap: Map<String, String>)
         fun onTrickle(candidate: IceCandidate, target: LivekitRtc.SignalTarget)
         fun onLocalTrackPublished(response: LivekitRtc.TrackPublishedResponse)
         fun onParticipantUpdate(updates: List<LivekitModels.ParticipantInfo>)
@@ -897,6 +948,7 @@ constructor(
         fun onRefreshToken(token: String)
         fun onLocalTrackUnpublished(trackUnpublished: LivekitRtc.TrackUnpublishedResponse)
         fun onLocalTrackSubscribed(trackSubscribed: LivekitRtc.TrackSubscribed)
+        fun onMediaSectionsRequirement(requirement: LivekitRtc.MediaSectionsRequirement)
     }
 
     companion object {
@@ -912,6 +964,7 @@ constructor(
         const val CONNECT_QUERY_OS_VERSION = "os_version"
         const val CONNECT_QUERY_NETWORK_TYPE = "network"
         const val CONNECT_QUERY_PARTICIPANT_SID = "sid"
+        const val CONNECT_QUERY_JOIN_REQUEST = "join_request"
 
         const val SD_TYPE_ANSWER = "answer"
         const val SD_TYPE_OFFER = "offer"
