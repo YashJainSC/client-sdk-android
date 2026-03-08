@@ -135,7 +135,13 @@ constructor(
             return@launchRTCIfNotClosed result
         } ?: Either.Right("PCT is closed.")
 
+        // [DIAG Issue 3] renegotiate flag is set on RTC thread (inside createAndSendOffer) but
+        // checked here on the caller's coroutine thread. If the answer arrives BEFORE the debounced
+        // createAndSendOffer has had a chance to set renegotiate=true, this check sees false and
+        // the new transceiver's offer is silently dropped.
+        LKLog.d { "[DIAG] setRemoteDescription: checking renegotiate flag = $renegotiate, sdp.type=${sd.type}" }
         if (this.renegotiate) {
+            LKLog.d { "[DIAG] setRemoteDescription: renegotiate=true, triggering new offer" }
             this.renegotiate = false
             this.createAndSendOffer()
         }
@@ -170,7 +176,9 @@ constructor(
                     restartingIce = true
                 }
 
-                if (peerConnection.signalingState() == SignalingState.HAVE_LOCAL_OFFER) {
+                val signalingState = peerConnection.signalingState()
+                LKLog.d { "[DIAG] createAndSendOffer: signalingState=$signalingState, thread=${Thread.currentThread().name}" }
+                if (signalingState == SignalingState.HAVE_LOCAL_OFFER) {
                     // we're waiting for the peer to accept our offer, so we'll just wait
                     // the only exception to this is when ICE restart is needed
                     val curSd = peerConnection.remoteDescription
@@ -179,6 +187,10 @@ constructor(
                         // the best thing to do is to recreate the peerconnection
                         peerConnection.setRemoteDescription(curSd)
                     } else {
+                        // [DIAG Issue 3] We are deferring this offer. It will only be sent after
+                        // setRemoteDescription() is called for the current pending offer's answer.
+                        // If that answer arrives BEFORE this line executes, the re-offer is lost.
+                        LKLog.w { "[DIAG] createAndSendOffer: HAVE_LOCAL_OFFER — deferring, setting renegotiate=true. If setRemoteDescription already ran, this offer will be lost! (Issue 3)" }
                         renegotiate = true
                         return@launchRTCIfNotClosed
                     }
@@ -190,6 +202,9 @@ constructor(
                 // so that we can use 0 as a default value for legacy behavior
                 // this may skip some ids, but is not an issue.
                 offerId = latestOfferId.incrementAndGet()
+                // [DIAG Issue 2] The offer is created here. If sortVideoCodecPreferences() hasn't
+                // taken effect at the native level yet, the codec order in this offer will be wrong.
+                LKLog.d { "[DIAG] createAndSendOffer: creating offer, offerId=$offerId, thread=${Thread.currentThread().name}" }
 
                 val sdpOffer = when (val outcome = peerConnection.createOffer(constraints)) {
                     is Either.Left -> outcome.value

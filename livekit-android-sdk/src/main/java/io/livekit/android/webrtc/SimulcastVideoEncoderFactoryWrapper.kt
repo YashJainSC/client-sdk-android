@@ -235,11 +235,16 @@ open class SimulcastVideoEncoderFactoryWrapper(
         override fun createEncoder(videoCodecInfo: VideoCodecInfo?): VideoEncoder? {
             val encoder = factory.createEncoder(videoCodecInfo)
             if (encoder == null) {
+                LKLog.d { "[DIAG] StreamEncoderWrapperFactory: factory returned null encoder for codec=${videoCodecInfo?.name}" }
                 return null
             }
             if (encoder is WrappedNativeVideoEncoder) {
+                // Hardware native encoder — StreamEncoderWrapper.initEncode() will NOT be called.
+                // If you never see initEncode logged, this is why (Issue 1).
+                LKLog.d { "[DIAG] StreamEncoderWrapperFactory: returning WrappedNativeVideoEncoder directly (no wrapper) for codec=${videoCodecInfo?.name}, encoderImpl=${encoder.implementationName}" }
                 return encoder
             }
+            LKLog.d { "[DIAG] StreamEncoderWrapperFactory: wrapping encoder in StreamEncoderWrapper for codec=${videoCodecInfo?.name}, encoderImpl=${encoder.implementationName}" }
             return StreamEncoderWrapper(encoder)
         }
 

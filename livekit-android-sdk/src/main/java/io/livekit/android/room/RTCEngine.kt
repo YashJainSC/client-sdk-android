@@ -681,12 +681,15 @@ internal constructor(
         // re-trigger negotiation even if the first attempt occurs before Signal connects.
         hasPublished = true
 
+        LKLog.d { "[DIAG] negotiatePublisher: called, client.isConnected=${client.isConnected}, thread=${Thread.currentThread().name}" }
         if (!client.isConnected) {
+            LKLog.w { "[DIAG] negotiatePublisher: skipped — signal client not connected. Negotiation will re-trigger on reconnect." }
             return
         }
 
         coroutineScope.launch {
             negotiatePublisherMutex.withLock {
+                LKLog.d { "[DIAG] negotiatePublisher: invoking debounced negotiate" }
                 publisher?.negotiate?.invoke(getPublisherOfferConstraints())
             }
         }

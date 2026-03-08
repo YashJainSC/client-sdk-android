@@ -678,7 +678,11 @@ internal constructor(
                 listOf(this.sid.value),
                 encodings,
             )
+            LKLog.d { "[DIAG] negotiate(): calling createSenderTransceiver on thread=${Thread.currentThread().name}, trackId=${track.rtcTrack.id()}" }
             val transceiver = engine.createSenderTransceiver(track.rtcTrack, transInit)
+            // NOTE: addTransceiver fires onRenegotiationNeeded synchronously, which queues
+            // a debounced createAndSendOffer (20ms). Codec prefs below must apply before that fires.
+            LKLog.d { "[DIAG] negotiate(): createSenderTransceiver returned, transceiver=${if (transceiver != null) "non-null" else "NULL"}, thread=${Thread.currentThread().name}" }
 
             when (track) {
                 is LocalVideoTrack -> track.transceiver = transceiver
@@ -712,16 +716,24 @@ internal constructor(
 
             if (finalOptions is VideoTrackPublishOptions) {
                 // Set preferred video codec order
+                // [DIAG Issue 2] These run on the coroutine thread. The debounced offer (20ms) runs
+                // on the RTC thread. If the offer fires before setCodecPreferences takes effect at
+                // the native level, the wrong codec order ends up in the SDP.
+                LKLog.d { "[DIAG] negotiate(): calling sortVideoCodecPreferences for codec=${finalOptions.videoCodec}, thread=${Thread.currentThread().name}" }
                 transceiver.sortVideoCodecPreferences(finalOptions.videoCodec, capabilitiesGetter)
+                LKLog.d { "[DIAG] negotiate(): sortVideoCodecPreferences done, thread=${Thread.currentThread().name}" }
                 (track as LocalVideoTrack).codec = finalOptions.videoCodec
 
                 val rtpParameters = transceiver.sender.parameters
+                LKLog.d { "[DIAG] negotiate(): sender.parameters encodings count=${rtpParameters?.encodings?.size}, active flags=${rtpParameters?.encodings?.map { it.active }}" }
                 rtpParameters.degradationPreference = finalOptions.degradationPreference
                 transceiver.sender.parameters = rtpParameters
+                LKLog.d { "[DIAG] negotiate(): sender.parameters set done" }
             }
 
             // PublisherTransportObserver.onRenegotiationNeeded() gets triggered automatically
             // so no need to call negotiate manually.
+            LKLog.d { "[DIAG] negotiate(): function complete — debounced offer should fire ~20ms from when onRenegotiationNeeded fired" }
         }
 
         suspend fun requestAddTrack(): TrackInfo? {
