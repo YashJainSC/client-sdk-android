@@ -61,6 +61,9 @@ internal class PublisherTransportObserver(
 
     override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
         LKLog.v { "onIceConnection new state: $newState" }
+        // [DIAG] Elevated to debug so ICE failures are visible without verbose logging.
+        // FAILED or DISCONNECTED here means the encoder will never start (initEncode never called).
+        LKLog.d { "[DIAG] publisher ICE state: $newState" }
     }
 
     override fun onOffer(sd: SessionDescription, offerId: Int) {
@@ -75,6 +78,9 @@ internal class PublisherTransportObserver(
     override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
         executeOnRTCThread(rtcThreadToken) {
             LKLog.v { "onConnection new state: $newState" }
+            // [DIAG] Overall PeerConnection state. CONNECTED = ICE+DTLS both up = encoder should start.
+            // FAILED here is the definitive reason initEncode was never called.
+            LKLog.d { "[DIAG] publisher PeerConnection state: $newState" }
             connectionChangeListener?.invoke(newState)
             connectionState = newState
         }
