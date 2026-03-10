@@ -241,7 +241,7 @@ open class SimulcastVideoEncoderFactoryWrapper(
             if (encoder is WrappedNativeVideoEncoder) {
                 // Hardware native encoder — StreamEncoderWrapper.initEncode() will NOT be called.
                 // If you never see initEncode logged, this is why (Issue 1).
-                LKLog.d { "[DIAG] StreamEncoderWrapperFactory: returning WrappedNativeVideoEncoder directly (no wrapper) for codec=${videoCodecInfo?.name}, encoderImpl=${encoder.implementationName}" }
+                LKLog.d { "[DIAG] StreamEncoderWrapperFactory: returning WrappedNativeVideoEncoder directly (no wrapper) for codec=${videoCodecInfo?.name}" }
                 return encoder
             }
             LKLog.d { "[DIAG] StreamEncoderWrapperFactory: wrapping encoder in StreamEncoderWrapper for codec=${videoCodecInfo?.name}, encoderImpl=${encoder.implementationName}" }
